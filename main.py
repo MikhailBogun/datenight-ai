@@ -17,6 +17,7 @@ load_dotenv()
 app = typer.Typer(help="DateNight Show Matcher — AI-powered TV show recommender.")
 console = Console()
 
+
 def _get_client() -> anthropic.Anthropic:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -27,6 +28,11 @@ def _get_client() -> anthropic.Anthropic:
         )
         raise typer.Exit(1)
     return anthropic.Anthropic(api_key=api_key)
+
+
+def _abort(step: str, err: Exception) -> None:
+    console.print(f"\n[red]✗ Step {step} failed:[/red] {err}")
+    raise typer.Exit(1)
 
 
 @app.command("get-show")
@@ -46,13 +52,15 @@ def get_show(username: str) -> None:
     try:
         profile_text = read_profile(username)
     except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+        _abort("1 (InstaReader)", e)
     console.print("  [green]✓[/green] Profile loaded")
 
     # Step 2: Build psychographic profile
     console.print("[cyan]●[/cyan] [bold]Step 2[/bold] Analyzing interests & vibe...")
-    profile = build_interest_profile(client, profile_text)
+    try:
+        profile = build_interest_profile(client, profile_text)
+    except Exception as e:
+        _abort("2 (InterestProfiler)", e)
     console.print(
         f"  [green]✓[/green] Interests: {', '.join(profile['primary_interests'])}"
     )
@@ -62,7 +70,10 @@ def get_show(username: str) -> None:
 
     # Step 3: Match shows to profile
     console.print("[cyan]●[/cyan] [bold]Step 3[/bold] Matching shows to her taste...")
-    candidates = match_shows(client, profile)
+    try:
+        candidates = match_shows(client, profile)
+    except Exception as e:
+        _abort("3 (ShowMatcher)", e)
     titles = [c["title"] for c in candidates["candidates"]]
     console.print(f"  [green]✓[/green] Candidates: {', '.join(titles)}")
 
@@ -70,7 +81,10 @@ def get_show(username: str) -> None:
     console.print(
         "[cyan]●[/cyan] [bold]Step 4[/bold] Checking Netflix & HBO availability..."
     )
-    result = check_streaming_availability(client, candidates)
+    try:
+        result = check_streaming_availability(client, candidates)
+    except Exception as e:
+        _abort("4 (StreamingChecker)", e)
 
     if not result["recommendations"]:
         console.print(
@@ -79,18 +93,24 @@ def get_show(username: str) -> None:
         )
         raise typer.Exit(0)
 
-    # Display final recommendations
+    # Display results
     table = Table(
         title="\n[bold magenta]Tonight's Picks[/bold magenta]",
         show_lines=True,
         border_style="magenta",
     )
     table.add_column("Show", style="bold cyan", min_width=20)
-    table.add_column("Platform", style="bold green", min_width=10)
-    table.add_column("Why she'll love it", style="white", min_width=40)
+    table.add_column("Platform", style="bold green", min_width=8)
+    table.add_column("Why she'll love it", style="white", min_width=35)
+    table.add_column("Start with", style="dim", min_width=30)
 
     for rec in result["recommendations"]:
-        table.add_row(rec["title"], rec["platform"], rec["reason"])
+        table.add_row(
+            rec["title"],
+            rec["platform"],
+            rec["reason"],
+            rec.get("conversation_starter", ""),
+        )
 
     console.print(table)
     console.print(

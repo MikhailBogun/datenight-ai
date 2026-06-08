@@ -64,6 +64,22 @@ RECENT POSTS:
 HASHTAGS USED: #vintage #thrifting #sustainablefashion #parisfashion #ootd
                #slowfashion #aestheticlife #fashionhistory #frenchgirl #romanticizelife
 """,
+
+    "@kdrama_girl": """
+BIO: 🇰🇷 k-drama addict | anime only | no western TV sorry 🙅
+     currently crying over Goblin (again) | Seoul bucket list 🌸
+
+RECENT POSTS:
+- "Crash Landing on You broke me. nothing will ever top this. #kdrama #cloy"
+- "recommend me a good isekai, I've watched everything on Crunchyroll 🥲 #anime"
+- "my non-negotiables: subtitles, slow burn romance, 16-episode format"
+- "Attack on Titan ended and I don't know who I am anymore 😭 #aot"
+- "rewatching Reply 1988 for the 5th time. the most comforting show ever made"
+- "I physically cannot watch American shows. the pacing is too fast #kdramaonly"
+
+HASHTAGS USED: #kdrama #anime #koreanwave #crunchyroll #slowburn
+               #koreandrama #webtoon #attackontitan #goblin #reply1988
+""",
 }
 
 

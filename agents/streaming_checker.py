@@ -4,56 +4,88 @@ from pathlib import Path
 
 import anthropic
 
+from agents.utils import extract_json
+
 CATALOG_PATH = Path(__file__).parent.parent / "data" / "streaming_catalog.json"
 
 with CATALOG_PATH.open() as f:
-    CATALOG: dict[str, list[str]] = json.load(f)
+    CATALOG: dict[str, dict] = json.load(f)
+
+ALLOWED_PLATFORMS = {"Netflix", "HBO"}
 
 CHECK_TOOL = {
-    "name": "check_show_availability",
+    "name": "check_shows_availability",
     "description": (
-        "Check if a TV show is available on Netflix or HBO. "
-        "Returns the platform name if available, or null if not found."
+        "Check which TV shows are available on Netflix or HBO (subscribed platforms). "
+        "Amazon Prime and other platforms are NOT available — exclude them. "
+        "Returns availability and platform for each title."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "title": {
-                "type": "string",
-                "description": "The exact title of the TV show to check.",
+            "titles": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of TV show titles to check.",
             }
         },
-        "required": ["title"],
+        "required": ["titles"],
     },
 }
 
-SYSTEM_PROMPT = """You are a streaming availability checker.
-You will receive a list of TV show candidates. For EACH show, you MUST call the \
-check_show_availability tool to verify if it is on Netflix or HBO.
-After checking all shows, return ONLY the ones that ARE available, with their platform.
-Output Format: valid JSON only:
-{
-  "recommendations": [
-    {"title": "Show Title", "platform": "Netflix or HBO", "reason": "why she'd love it"}
-  ]
-}
-If no shows are available, return {"recommendations": []}.
-No markdown, no preamble. JSON only."""
+SYSTEM_PROMPT = (
+    "You are a streaming availability checker.\n"
+    "You will receive a list of TV show candidates. Call the "
+    "check_shows_availability tool ONCE with all titles at the same time.\n"
+    "After receiving the results, return ONLY the shows that ARE available, "
+    "preserving the reason and conversation_starter from the input.\n"
+    "If zero shows are available, return {\"recommendations\": []}.\n"
+    "Output Format: valid JSON only, no markdown, no preamble:\n"
+    "{\n"
+    '  "recommendations": [\n'
+    '    {\n'
+    '      "title": "Show Title",\n'
+    '      "platform": "Netflix or HBO",\n'
+    '      "reason": "why she would love it",\n'
+    '      "conversation_starter": "question this show will spark"\n'
+    "    }\n"
+    "  ]\n"
+    "}"
+)
 
 
-def _run_tool(title: str) -> dict:
-    for platform, shows in CATALOG.items():
-        for show in shows:
-            if show.lower() == title.lower():
-                return {"available": True, "platform": platform, "title": show}
-    return {"available": False, "platform": None, "title": title}
+def _run_tool(titles: list[str]) -> list[dict]:
+    results = []
+    for title in titles:
+        title_lower = title.lower()
+        entry = next(
+            (data | {"title": t} for t, data in CATALOG.items()
+             if t.lower() == title_lower),
+            None,
+        )
+        if entry and entry["platform"] in ALLOWED_PLATFORMS:
+            results.append({
+                "title": entry["title"],
+                "platform": entry["platform"],
+                "available": True,
+            })
+        else:
+            platform_note = entry["platform"] if entry else "not in catalog"
+            results.append({
+                "title": title,
+                "available": False,
+                "reason": f"found on {platform_note} — not a subscribed platform",
+            })
+    return results
 
 
 def check_streaming_availability(
     client: anthropic.Anthropic, candidates: dict
 ) -> dict:
     candidates_text = "\n".join(
-        f"- {c['title']}: {c['reason']}" for c in candidates["candidates"]
+        f"- {c['title']}: {c['reason']} | "
+        f"Conversation starter: {c.get('conversation_starter', '')}"
+        for c in candidates["candidates"]
     )
 
     messages = [
@@ -61,7 +93,8 @@ def check_streaming_availability(
             "role": "user",
             "content": (
                 f"Check availability for these shows:\n{candidates_text}\n\n"
-                "Check each one and return only those available on Netflix or HBO."
+                "Call the tool once with all titles, then return only "
+                "those available on Netflix or HBO."
             ),
         }
     ]
@@ -78,8 +111,6 @@ def check_streaming_availability(
         if response.stop_reason == "end_turn":
             for block in response.content:
                 if hasattr(block, "text"):
-                    from agents.utils import extract_json
-
                     return extract_json(block.text)
             return {"recommendations": []}
 
@@ -89,12 +120,12 @@ def check_streaming_availability(
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    result = _run_tool(block.input["title"])
+                    results = _run_tool(block.input["titles"])
                     tool_results.append(
                         {
                             "type": "tool_result",
                             "tool_use_id": block.id,
-                            "content": json.dumps(result),
+                            "content": json.dumps(results),
                         }
                     )
 
